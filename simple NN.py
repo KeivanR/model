@@ -11,10 +11,10 @@ def update_syn(X,Y,s0,s1,interval):
     s0 += np.dot(X[interval].T,delta_l1)
     return{'s0':s0,'s1':s1}
 np.random.seed(1)
-training_size = 40
-input_size = 10
+training_size = 400
+input_size = 5
 l1_size = 7
-batch_size = 1
+batch_size = 400
 X = (2*np.random.random((training_size,input_size))).astype(int)
 print('input: ',X)
 Y = (2*np.random.random((training_size,1))).astype(int)
