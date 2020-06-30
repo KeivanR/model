@@ -11,13 +11,16 @@ model = Model(X_train[0].shape,[1,10])
 
 #model.add_filters(2,[5,5],2,3,'Filter 1',reLU)
 
-model.add_FC(100,'FC 0',reLU)
-
-model.add_FC(10,'FC 1',reLU)
+model.add_FC(300,'FC 0',tanh,0.01)
+model.add_FC(10,'final layer',tanh,0.01)
 
 trainer = Trainer(0,'L2','sgd')
 
 #print(model.synapses[2].W)
-trainer.train(X_train[:10000],y_train[:10000],model,num_epochs = 3,batch_size = 200,l_rate = 0.01,loss_func = softmax_loss)
+size_sample = 60000
+trainer.train(X_train[:size_sample],y_train[:size_sample],model,num_epochs = 5,batch_size = 50,l_rate = 0.01,loss_func = softmax_loss)
+print(trainer.get_loss())
+all_W = model.get_W()
+print('W: mean = ',np.mean(all_W),' ; std = ',np.std(all_W))
 #print(model.synapses[2].W)
-ms.save(model,'model2')
+ms.save(model,'model5')

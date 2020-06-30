@@ -86,8 +86,6 @@ class Trainer():
 					model.feed_fwd(X[interval][k])
 					loss = loss_func(model.layers[-1],int(y[interval][k]))
 					grad = self.loss_gradient(model,loss_func,int(y[interval][k]))
-					if i==0 and j==0 and k==0:
-						print(grad)
 					for n in range(0,len(model.synapses)):
 						wgrad[n]+=grad[n]['wgrad']
 						bgrad[n]+=grad[n]['bgrad']
@@ -97,8 +95,11 @@ class Trainer():
 					wgrad[n] = wgrad[n]/len(interval)
 					bgrad[n] = bgrad[n]/len(interval)
 				model = self.update(model,wgrad,bgrad,l_rate)	
-				self.loss = self.loss/len(interval)+self.reg_coeff*model.get_sumW(self.reg_type)
-				
+				if self.reg_type == 'L1':
+					reg = np.sum(np.abs(model.get_W()))
+				if self.reg_type == 'L2':
+					reg = np.sum(np.square(model.get_W()))
+				self.loss = self.loss/len(interval)+self.reg_coeff*reg
 				   
 			interval = np.arange(interval[-1]+1,len(X))
 			if len(interval)>0:
@@ -114,12 +115,12 @@ class Model():
 		self.current_output_size = input_size
 		self.synapses = []
 		self.layers = [np.zeros(input_size)]
-	def add_filters(self,n,size,padding,stride,name,activation):
-		self.synapses.append(Filter(n,size,padding,stride,name,self.current_output_size,activation))
+	def add_filters(self,n,size,padding,stride,name,activation,init_W):
+		self.synapses.append(Filter(n,size,padding,stride,name,self.current_output_size,activation,init_W))
 		self.layers.append(0)
 		self.current_output_size = self.synapses[-1].output_size
-	def add_FC(self,size,name,activation):
-		self.synapses.append(FC(size,name,self.current_output_size,activation))
+	def add_FC(self,size,name,activation,init_W):
+		self.synapses.append(FC(size,name,self.current_output_size,activation,init_W))
 		self.layers.append(0)
 		self.current_output_size = size
 	def feed_fwd(self,input):
@@ -127,22 +128,16 @@ class Model():
 		for i in range(0,len(self.synapses)):
 			self.layers[i+1]=self.synapses[i].feed_fwd(input)
 			input = self.layers[i+1]
-	def get_sumW(self,type):
-		reg = 0
-		if type == 'L2':
-			for i in range(0,len(self.synapses)):
-				reg+=np.sum(np.square(self.synapses[i].W))
-			return reg	
-		if type == 'L1':
-			for i in range(0,len(self.synapses)):
-				reg+=np.sum(np.abs(self.synapses[i].W))
-			return reg	
-	
+	def get_W(self):
+		all_W = np.asarray(self.synapses[0].W).flatten()
+		for i in range(1,len(self.synapses)):
+			all_W = np.concatenate((all_W,np.asarray(self.synapses[i].W).flatten()),axis=None)
+		return all_W
 	
 		
 		
 class Filter():
-	def __init__(self,n,size,padding,stride,name,input_size,activation):
+	def __init__(self,n,size,padding,stride,name,input_size,activation,init_W):
 		self.number = n
 		self.size = size
 		self.padding = padding
@@ -152,7 +147,7 @@ class Filter():
 		self.W = []
 		self.b = []
 		for i in range(0,n):
-			self.W.append(0.0001*np.random.randn(size[0],size[1],input_size[2]))
+			self.W.append(init_W*np.random.randn(size[0],size[1],input_size[2]))
 			self.b.append(0)
 		self.W = np.asarray(self.W)
 		self.b = np.asarray(self.b)
@@ -214,7 +209,7 @@ class Filter():
 		return {'bgrad':np.asarray(bgrad),'wgrad':np.asarray(wgrad),'next_grad':xgrad}
 
 class FC():
-	def __init__(self,size,name,input_size,activation):
+	def __init__(self,size,name,input_size,activation,init_W):
 		self.size = size
 		self.name = name
 		self.activation = activation
@@ -224,7 +219,7 @@ class FC():
 		else:
 			streched_input_size = input_size
 		print(streched_input_size)
-		self.W = 0.0001*np.random.randn(streched_input_size,size)
+		self.W = init_W*np.random.randn(streched_input_size,size)
 		self.b = np.zeros(size)
 	def feed_fwd(self,input):
 		return self.activation(np.dot(input.flatten(),self.W)+self.b)
