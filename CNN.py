@@ -47,19 +47,31 @@ def loss_grad(function,output,y):
 		res[y] = resy
 		return res
 class Trainer():
-	def __init__(self,reg_coeff,reg_type,update):
+	def __init__(self,reg_coeff,reg_type,update_type):
 		self.reg_coeff = reg_coeff
 		self.reg_type = reg_type
-		self.update = update
+		self.update_type = update_type
 	def get_loss(self):
 		return self.loss	
-	def gradient(self,model,loss_func,y):
+	def loss_gradient(self,model,loss_func,y):
 		grad = [None]*len(model.synapses)
 		last_grad = loss_grad(loss_func,model.layers[-1],y)
-		for i in range(len(model.synapses)-1,0,-1):
-			grad[i] = model.synapses[i].get_grad(model.layers[i-1],last_grad)
+		for i in range(len(model.synapses)-1,-1,-1):
+			grad[i] = model.synapses[i].get_grad(model.layers[i],last_grad)
 			last_grad = grad[i]['next_grad']
 		return grad
+	def update(self,model,wgrad,bgrad,l_rate):
+		if self.update_type == 'sgd':
+			for i in range(0,len(model.synapses)):
+				if self.reg_type == 'L2':
+					model.synapses[i].W -= l_rate*(wgrad[i]+self.reg_coeff*2*model.synapses[i].W)
+					model.synapses[i].b = model.synapses[i].b-l_rate*bgrad[i]
+				if self.reg_type == 'L1':
+					reg = model.synapses[i].W/np.abs(model.synapses[i].W)
+					reg[np.isnan(reg)]=1
+					model.synapses[i].W -= l_rate*(wgrad[i]+self.reg_coeff*reg)
+					model.synapses[i].b = model.synapses[i].b-l_rate*bgrad[i]
+		return model
 	def train(self,X,y,model,num_epochs,batch_size,l_rate,loss_func):
 		for i in range(0,num_epochs):
 			for j in range(0,int(len(X)/batch_size)):
@@ -72,26 +84,27 @@ class Trainer():
 				for k in range(0,len(interval)):
 					model.feed_fwd(X[interval][k])
 					loss = loss_func(model.layers[-1],int(y[interval][k]))
-					grad = self.gradient(model,loss_func,int(y[interval][k]))
+					grad = self.loss_gradient(model,loss_func,int(y[interval][k]))
+					if i==0 and j==0 and k==0:
+						print(grad)
 					for n in range(0,len(model.synapses)):
 						wgrad[n]+=grad[n]['wgrad']
 						bgrad[n]+=grad[n]['bgrad']
 					self.loss += loss
 				
+				for n in range(0,len(model.synapses)):
+					wgrad[n] = wgrad[n]/len(interval)
+					bgrad[n] = bgrad[n]/len(interval)
+				model = self.update(model,wgrad,bgrad,l_rate)	
 				self.loss = self.loss/len(interval)+self.reg_coeff*model.get_sumW(self.reg_type)
 				
 				   
 			interval = np.arange(interval[-1]+1,len(X))
 			if len(interval)>0:
-				print('rest of batch:')
+				print('rest of batch(not calculated):')
 				if i==0:
 					print(interval[0],':',interval[-1])
-				self.loss = 0
-				for k in range(0,len(interval)):
-					model.feed_fwd(X[interval][k])
-					loss += loss_func(model.layers[-1],y[interval][k])
-				self.loss = loss/len(interval)+self.reg_coeff*model.get_sumW(self.reg_type)
-				model.backprop(self.loss)
+				
 		
 class Model():
 	def __init__(self,input_size,output_size):
@@ -99,7 +112,7 @@ class Model():
 		self.output_size = output_size
 		self.current_output_size = input_size
 		self.synapses = []
-		self.layers = []
+		self.layers = [np.zeros(input_size)]
 	def add_filters(self,n,size,padding,stride,name,activation):
 		self.synapses.append(Filter(n,size,padding,stride,name,self.current_output_size,activation))
 		self.layers.append(0)
@@ -109,9 +122,10 @@ class Model():
 		self.layers.append(0)
 		self.current_output_size = size
 	def feed_fwd(self,input):
+		self.layers[0]=input
 		for i in range(0,len(self.synapses)):
-			self.layers[i]=self.synapses[i].feed_fwd(input)
-			input = self.layers[i]
+			self.layers[i+1]=self.synapses[i].feed_fwd(input)
+			input = self.layers[i+1]
 	def get_sumW(self,type):
 		reg = 0
 		if type == 'L2':
@@ -234,9 +248,9 @@ print(model.synapses[1].W,model.synapses[1].b)
 model.add_FC(10,'FC 1',reLU)
 print(model.synapses[2].W,model.synapses[2].b)
 model.feed_fwd(np.ones((10,10,3)))
-print(model.layers[2])
-print(model.synapses[1].W.flatten())
-trainer = Trainer(0.1,'L2','sgd')
-X_train = np.zeros((20,10,10,3))
+trainer = Trainer(0.1,'L1','sgd')
+X_train = np.ones((20,10,10,3))
 y_train = np.ones(20)
+print(model.synapses[2].W)
 trainer.train(X_train,y_train,model,num_epochs = 3,batch_size = 10,l_rate = 0.01,loss_func = softmax_loss)
+print(model.synapses[2].W)
