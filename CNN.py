@@ -17,7 +17,11 @@ def activation_grad(function,x):
 		return 1-tanh(x)**2
 	elif function == reLU or function == preLU:
 		res = function(x)/x
-		res[np.isnan(res)] = 0
+		if isinstance(res, (list, tuple, np.ndarray)):
+			res[np.isnan(res)] = 0
+		else:
+			if np.isnan(res):
+				res =0
 		return res
 #loss functions
 def multiclass_SVM_loss(output,y):
@@ -49,22 +53,29 @@ class Trainer():
 		self.update = update
 	def get_loss(self):
 		return self.loss	
-	def gradient(self,model,score_func,y):
+	def gradient(self,model,loss_func,y):
 		grad = [None]*len(model.synapses)
-		last_grad = loss_grad(score_func,model.layers[-1],y)
+		last_grad = loss_grad(loss_func,model.layers[-1],y)
 		for i in range(len(model.synapses)-1,0,-1):
 			grad[i] = model.synapses[i].get_grad(model.layers[i-1],last_grad)
-	def train(self,X,y,model,num_epochs,batch_size,l_rate,score_func):
+			last_grad = grad[i]['next_grad']
+		return grad
+	def train(self,X,y,model,num_epochs,batch_size,l_rate,loss_func):
 		for i in range(0,num_epochs):
 			for j in range(0,int(len(X)/batch_size)):
+				wgrad = [0]*len(model.synapses)
+				bgrad = [0]*len(model.synapses)
 				interval = np.arange(j*batch_size,(j+1)*batch_size)
 				if i==0:
 					print(interval[0],':',interval[-1])
 				self.loss = 0
 				for k in range(0,len(interval)):
 					model.feed_fwd(X[interval][k])
-					loss = score_func(model.layers[-1],y[interval][k])
-					grad += model.get_grad(loss)
+					loss = loss_func(model.layers[-1],int(y[interval][k]))
+					grad = self.gradient(model,loss_func,int(y[interval][k]))
+					for n in range(0,len(model.synapses)):
+						wgrad[n]+=grad[n]['wgrad']
+						bgrad[n]+=grad[n]['bgrad']
 					self.loss += loss
 				
 				self.loss = self.loss/len(interval)+self.reg_coeff*model.get_sumW(self.reg_type)
@@ -75,10 +86,10 @@ class Trainer():
 				print('rest of batch:')
 				if i==0:
 					print(interval[0],':',interval[-1])
-				loss = 0
+				self.loss = 0
 				for k in range(0,len(interval)):
 					model.feed_fwd(X[interval][k])
-					loss += score_func(model.layers[-1],y[interval][k])
+					loss += loss_func(model.layers[-1],y[interval][k])
 				self.loss = loss/len(interval)+self.reg_coeff*model.get_sumW(self.reg_type)
 				model.backprop(self.loss)
 		
@@ -155,12 +166,37 @@ class Filter():
 					layer[i,j,k] = self.activation(np.dot(inputConv.flatten(),WConv.flatten())+self.b[k])
 		return layer
 	def get_grad(self,input,last_grad):
+		bgrad = []
+		wgrad = []
+		xgrad = 0*input
 		for k in range(0,self.number):
-			
-			bgrad = last_grad*activation_grad(self.activation,np.dot(input.flatten(),self.W)+self.b)
-			wgrad = last_grad*activation_grad(self.activation,np.dot(input.flatten(),self.W)+self.b)*input
-			xgrad = last_grad*activation_grad(self.activation,np.dot(input.flatten(),self.W)+self.b)*self.W
-			next_grad = np.sum(xgrad,axis=0)
+			bgrad.append(0)
+			wgrad.append(0*self.W[k])
+			for i in range(0,self.output_size[0]):
+				for j in range(0,self.output_size[1]):
+					inputConv = input[
+						max(0,i*self.stride-self.padding):min(input.shape[0],i*self.stride+self.size[0]-self.padding),
+						max(0,j*self.stride-self.padding):min(input.shape[1],j*self.stride+self.size[1]-self.padding),
+						:
+						]
+					WConv = self.W[k][
+						max(0,self.padding-i*self.stride):min(self.W[k].shape[0],self.W[k].shape[0]-(i*self.stride+self.size[0]-self.padding-input.shape[0])),
+						max(0,self.padding-j*self.stride):min(self.W[k].shape[1],self.W[k].shape[0]-(j*self.stride+self.size[1]-self.padding-input.shape[1])),
+						:
+						]
+					actigrad = activation_grad(self.activation,np.dot(inputConv.flatten(),WConv.flatten())+self.b[k])
+					bgrad[k]+=last_grad[i,j,k]*actigrad
+					wgrad[k][
+						max(0,self.padding-i*self.stride):min(self.W[k].shape[0],self.W[k].shape[0]-(i*self.stride+self.size[0]-self.padding-input.shape[0])),
+						max(0,self.padding-j*self.stride):min(self.W[k].shape[1],self.W[k].shape[0]-(j*self.stride+self.size[1]-self.padding-input.shape[1])),
+						:
+						]+=inputConv*last_grad[i,j,k]*actigrad
+					xgrad[
+						max(0,i*self.stride-self.padding):min(input.shape[0],i*self.stride+self.size[0]-self.padding),
+						max(0,j*self.stride-self.padding):min(input.shape[1],j*self.stride+self.size[1]-self.padding),
+						:
+						] += WConv*last_grad[i,j,k]*actigrad
+		return {'bgrad':np.asarray(bgrad),'wgrad':np.asarray(wgrad),'next_grad':xgrad}
 
 class FC():
 	def __init__(self,size,name,input_size,activation):
@@ -178,10 +214,12 @@ class FC():
 	def feed_fwd(self,input):
 		return self.activation(np.dot(input.flatten(),self.W)+self.b)
 	def get_grad(self,input,last_grad):
-		bgrad = last_grad*activation_grad(self.activation,np.dot(input.flatten(),self.W)+self.b)
-		wgrad = np.outer(input.flatten(),last_grad*activation_grad(self.activation,np.dot(input.flatten(),self.W)+self.b))
-		xgrad = np.dot(last_grad*activation_grad(self.activation,np.dot(input.flatten(),self.W)+self.b),self.W.T)
+		actigrad = activation_grad(self.activation,np.dot(input.flatten(),self.W)+self.b)
+		bgrad = last_grad*actigrad
+		wgrad = np.outer(input.flatten(),last_grad*actigrad)
+		xgrad = np.dot(last_grad*actigrad,self.W.T)
 		xgrad = xgrad.reshape(input.shape)
+		return {'bgrad':bgrad,'wgrad':wgrad,'next_grad':xgrad}
 
 model = Model([10,10,3],[1,10])
 
@@ -198,3 +236,7 @@ print(model.synapses[2].W,model.synapses[2].b)
 model.feed_fwd(np.ones((10,10,3)))
 print(model.layers[2])
 print(model.synapses[1].W.flatten())
+trainer = Trainer(0.1,'L2','sgd')
+X_train = np.zeros((20,10,10,3))
+y_train = np.ones(20)
+trainer.train(X_train,y_train,model,num_epochs = 3,batch_size = 10,l_rate = 0.01,loss_func = softmax_loss)
