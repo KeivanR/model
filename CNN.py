@@ -23,13 +23,15 @@ def activation_grad(function,x):
 			if np.isnan(res):
 				res =0
 		return res
+def probability(output,y):
+	return np.exp(output[y])/np.sum(np.exp(output))
 #loss functions
 def multiclass_SVM_loss(output,y):
 	margins = np.maximum(0,output-output[y]+1)
 	margins[y]=0
 	return np.sum(margins)
 def softmax_loss(output,y):
-	return -np.log(np.exp(output[y])/np.sum(np.exp(output)))
+	return -np.log(probability(output,y))
 #loss function gradients
 def loss_grad(function,output,y):
 	if function == softmax_loss:
@@ -78,8 +80,7 @@ class Trainer():
 				wgrad = [0]*len(model.synapses)
 				bgrad = [0]*len(model.synapses)
 				interval = np.arange(j*batch_size,(j+1)*batch_size)
-				if i==0:
-					print(interval[0],':',interval[-1])
+				print('epoch ',i,', ',interval[0],':',interval[-1])
 				self.loss = 0
 				for k in range(0,len(interval)):
 					model.feed_fwd(X[interval][k])
@@ -182,7 +183,7 @@ class Filter():
 	def get_grad(self,input,last_grad):
 		bgrad = []
 		wgrad = []
-		xgrad = 0*input
+		xgrad = 0.0*input
 		for k in range(0,self.number):
 			bgrad.append(0)
 			wgrad.append(0*self.W[k])
@@ -218,7 +219,7 @@ class FC():
 		self.name = name
 		self.activation = activation
 		print(input_size)
-		if len(input_size)>1:
+		if isinstance(input_size, (list, tuple, np.ndarray)):
 			streched_input_size = input_size[0]*input_size[1]*input_size[2]
 		else:
 			streched_input_size = input_size
@@ -235,22 +236,4 @@ class FC():
 		xgrad = xgrad.reshape(input.shape)
 		return {'bgrad':bgrad,'wgrad':wgrad,'next_grad':xgrad}
 
-model = Model([10,10,3],[1,10])
 
-print(model.output_size)
-#print(model.current_output_size)
-model.add_filters(1,[5,5],2,1,'Filter 1',reLU)
-print(model.synapses[0].W,model.synapses[0].b)
-#print(model.current_output_size)
-model.add_filters(5,[3,3],0,1,'Filter 2',reLU)
-print(model.synapses[1].W,model.synapses[1].b)
-#print(model.current_output_size)
-model.add_FC(10,'FC 1',reLU)
-print(model.synapses[2].W,model.synapses[2].b)
-model.feed_fwd(np.ones((10,10,3)))
-trainer = Trainer(0.1,'L1','sgd')
-X_train = np.ones((20,10,10,3))
-y_train = np.ones(20)
-print(model.synapses[2].W)
-trainer.train(X_train,y_train,model,num_epochs = 3,batch_size = 10,l_rate = 0.01,loss_func = softmax_loss)
-print(model.synapses[2].W)
