@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.signal import convolve
 
 #activation functions
 def sigmoid(x):
@@ -15,14 +16,10 @@ def activation_grad(function,x):
 		return sigmoid(x)*(1-sigmoid(x))
 	elif function == tanh:
 		return 1-tanh(x)**2
-	elif function == reLU or function == preLU:
-		res = function(x)/x
-		if isinstance(res, (list, tuple, np.ndarray)):
-			res[np.isnan(res)] = 0
-		else:
-			if np.isnan(res):
-				res =0
-		return res
+	elif function == reLU:
+		return x>=0
+	elif function == preLU:
+		return 0.01+(x>=0)*(1-0.01)
 def probability(output,y):
 	return np.exp(output[y])/np.sum(np.exp(output))
 #loss functions
@@ -137,10 +134,12 @@ class Model():
 		
 		
 class Filter():
-	def __init__(self,n,size,padding,stride,name,input_size,activation,init_W):
+	def __init__(self,n,size,padding,stride,name,input_size,activation,init_W,padding_mode = 'constant',padding_cons=0):
 		self.number = n
 		self.size = size
 		self.padding = padding
+		self.padding_mode = padding_mode
+		self.padding_cons = padding_cons
 		self.stride = stride
 		self.name = name
 		self.activation = activation
@@ -161,51 +160,25 @@ class Filter():
 	def feed_fwd(self,input):
 		layer = np.zeros(self.output_size)
 		for k in range(0,self.number):
-			for i in range(0,self.output_size[0]):
-				for j in range(0,self.output_size[1]):
-					inputConv = input[
-						max(0,i*self.stride-self.padding):min(input.shape[0],i*self.stride+self.size[0]-self.padding),
-						max(0,j*self.stride-self.padding):min(input.shape[1],j*self.stride+self.size[1]-self.padding),
-						:
-						]
-					WConv = self.W[k][
-						max(0,self.padding-i*self.stride):min(self.W[k].shape[0],self.W[k].shape[0]-(i*self.stride+self.size[0]-self.padding-input.shape[0])),
-						max(0,self.padding-j*self.stride):min(self.W[k].shape[1],self.W[k].shape[0]-(j*self.stride+self.size[1]-self.padding-input.shape[1])),
-						:
-						]
-					layer[i,j,k] = self.activation(np.dot(inputConv.flatten(),WConv.flatten())+self.b[k])
+			conv = convolve(input,self.W[k], mode='full')[:,:,input.shape[2]-1]+self.b[k]
+			conv = conv[(self.size[0]-self.padding-1):-(self.size[0]-self.padding-1):self.stride,(self.size[1]-self.padding-1):-(self.size[1]-self.padding-1):self.stride]
+			layer[:,:,k] = self.activation(conv)
 		return layer
 	def get_grad(self,input,last_grad):
 		bgrad = []
 		wgrad = []
 		xgrad = 0.0*input
 		for k in range(0,self.number):
-			bgrad.append(0)
-			wgrad.append(0*self.W[k])
-			for i in range(0,self.output_size[0]):
-				for j in range(0,self.output_size[1]):
-					inputConv = input[
-						max(0,i*self.stride-self.padding):min(input.shape[0],i*self.stride+self.size[0]-self.padding),
-						max(0,j*self.stride-self.padding):min(input.shape[1],j*self.stride+self.size[1]-self.padding),
-						:
-						]
-					WConv = self.W[k][
-						max(0,self.padding-i*self.stride):min(self.W[k].shape[0],self.W[k].shape[0]-(i*self.stride+self.size[0]-self.padding-input.shape[0])),
-						max(0,self.padding-j*self.stride):min(self.W[k].shape[1],self.W[k].shape[0]-(j*self.stride+self.size[1]-self.padding-input.shape[1])),
-						:
-						]
-					actigrad = activation_grad(self.activation,np.dot(inputConv.flatten(),WConv.flatten())+self.b[k])
-					bgrad[k]+=last_grad[i,j,k]*actigrad
-					wgrad[k][
-						max(0,self.padding-i*self.stride):min(self.W[k].shape[0],self.W[k].shape[0]-(i*self.stride+self.size[0]-self.padding-input.shape[0])),
-						max(0,self.padding-j*self.stride):min(self.W[k].shape[1],self.W[k].shape[0]-(j*self.stride+self.size[1]-self.padding-input.shape[1])),
-						:
-						]+=inputConv*last_grad[i,j,k]*actigrad
-					xgrad[
-						max(0,i*self.stride-self.padding):min(input.shape[0],i*self.stride+self.size[0]-self.padding),
-						max(0,j*self.stride-self.padding):min(input.shape[1],j*self.stride+self.size[1]-self.padding),
-						:
-						] += WConv*last_grad[i,j,k]*actigrad
+			conv = convolve(input,self.W[k], mode='full')[:,:,input.shape[2]-1]+self.b[k]
+			conv = conv[(self.size[0]-self.padding-1):-(self.size[0]-self.padding-1):self.stride,(self.size[1]-self.padding-1):-(self.size[1]-self.padding-1):self.stride]
+			actigrad = activation_grad(self.activation,conv)
+			actigrad_spaces = np.zeros((self.stride*actigrad.shape[0],self.stride*actigrad.shape[1]))
+			actigrad_spaces[::self.stride,::self.stride] = last_grad[:,:,k]*actigrad
+			bgrad.append(np.sum(last_grad[:,:,k]*actigrad))
+			lgas_rep = np.repeat((actigrad_spaces)[:,:,np.newaxis],input.shape[2],axis = 2)
+			wgrad.append(convolve(input,lgas_rep, mode='valid')[:,:,input.shape[2]-1])
+			xgrad += convolve(self.W[k],lgas_rep, mode='full')[:,:,input.shape[2]-1]
+			
 		return {'bgrad':np.asarray(bgrad),'wgrad':np.asarray(wgrad),'next_grad':xgrad}
 
 class FC():
@@ -232,3 +205,6 @@ class FC():
 		return {'bgrad':bgrad,'wgrad':wgrad,'next_grad':xgrad}
 
 
+#model = Model([10,10,3],[1,10])
+#model.add_filters(3,[5,5],2,3,'Filter 1',preLU,0.0001)
+#model.feed_fwd(np.zeros((10,10,3)))
