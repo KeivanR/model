@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.signal import convolve
 
+
 #activation functions
 def sigmoid(x):
 	return 1/(1+np.exp(-x))
@@ -150,34 +151,43 @@ class Filter():
 			self.b.append(0)
 		self.W = np.asarray(self.W)
 		self.b = np.asarray(self.b)
-		out_sizeX = int((input_size[0]+2*padding-size[0])/stride+1)
-		out_sizeY = int((input_size[1]+2*padding-size[1])/stride+1)
+		out_sizeX = (input_size[0]+2*padding-size[0])/stride+1
+		out_sizeY = (input_size[1]+2*padding-size[1])/stride+1
 		if (int(out_sizeX)!=out_sizeX):
 			print("the stride for filter ",name," does not fit X input size")
 		if (int(out_sizeY)!=out_sizeY):
 			print("the stride for filter ",name," does not fit Y input size")
+		out_sizeX = int(out_sizeX)
+		out_sizeY = int(out_sizeY)
 		self.output_size = [out_sizeX,out_sizeY,n]
 	def feed_fwd(self,input):
 		layer = np.zeros(self.output_size)
 		for k in range(0,self.number):
 			conv = convolve(input,self.W[k], mode='full')[:,:,input.shape[2]-1]+self.b[k]
-			conv = conv[(self.size[0]-self.padding-1):-(self.size[0]-self.padding-1):self.stride,(self.size[1]-self.padding-1):-(self.size[1]-self.padding-1):self.stride]
+			unpadding = [[self.size[0]-self.padding-1,-(self.size[0]-self.padding-1)],[self.size[1]-self.padding-1,-(self.size[1]-self.padding-1)]]
+			conv = conv[unpadding[0][0]:(unpadding[0][1] or None):self.stride,unpadding[1][0]:(unpadding[1][1] or None):self.stride]
 			layer[:,:,k] = self.activation(conv)
 		return layer
 	def get_grad(self,input,last_grad):
-		bgrad = []
-		wgrad = []
+		bgrad = 0*self.b
+		wgrad = 0*self.W
 		xgrad = 0.0*input
 		for k in range(0,self.number):
 			conv = convolve(input,self.W[k], mode='full')[:,:,input.shape[2]-1]+self.b[k]
-			conv = conv[(self.size[0]-self.padding-1):-(self.size[0]-self.padding-1):self.stride,(self.size[1]-self.padding-1):-(self.size[1]-self.padding-1):self.stride]
+			unpadding = [[self.size[0]-self.padding-1,-(self.size[0]-self.padding-1)],[self.size[1]-self.padding-1,-(self.size[1]-self.padding-1)]]
+			conv = conv[unpadding[0][0]:(unpadding[0][1] or None):self.stride,unpadding[1][0]:(unpadding[1][1] or None):self.stride]
 			actigrad = activation_grad(self.activation,conv)
-			actigrad_spaces = np.zeros((self.stride*actigrad.shape[0],self.stride*actigrad.shape[1]))
+			actigrad_spaces = np.zeros((self.stride*actigrad.shape[0]-self.stride+1,self.stride*actigrad.shape[1]-self.stride+1))
 			actigrad_spaces[::self.stride,::self.stride] = last_grad[:,:,k]*actigrad
-			bgrad.append(np.sum(last_grad[:,:,k]*actigrad))
-			lgas_rep = np.repeat((actigrad_spaces)[:,:,np.newaxis],input.shape[2],axis = 2)
-			wgrad.append(convolve(input,lgas_rep, mode='valid')[:,:,input.shape[2]-1])
-			xgrad += convolve(self.W[k],lgas_rep, mode='full')[:,:,input.shape[2]-1]
+			input_pad = np.pad(input,((self.padding,self.padding),(self.padding,self.padding),(0,0)),mode = self.padding_mode,
+				constant_values = ((self.padding_cons,self.padding_cons),(self.padding_cons,self.padding_cons),(None,None)))
+			bgrad[k] = np.sum(last_grad[:,:,k]*actigrad)
+			actigrad_spaces_pad = np.pad(actigrad_spaces,((self.size[0]-self.padding-1,self.size[0]-self.padding-1),(self.size[1]-self.padding-1,self.size[1]-self.padding-1)),mode = self.padding_mode,
+				constant_values = ((self.padding_cons,self.padding_cons),(self.padding_cons,self.padding_cons)))
+			for i in range(0,input.shape[2]):
+				wgrad[k][:,:,i] = convolve(input_pad[:,:,i],actigrad_spaces, mode='valid')
+				xgrad[:,:,i] += convolve(self.W[k][:,:,i],actigrad_spaces_pad, mode='valid')
+			
 			
 		return {'bgrad':np.asarray(bgrad),'wgrad':np.asarray(wgrad),'next_grad':xgrad}
 
