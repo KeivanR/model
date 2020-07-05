@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.signal import convolve
-
-
+import keyboard
+import datetime
 #activation functions
 def sigmoid(x):
 	return 1/(1+np.exp(-x))
@@ -51,8 +51,17 @@ class Trainer():
 		self.reg_coeff = reg_coeff
 		self.reg_type = reg_type
 		self.update_type = update_type
-	def get_loss(self):
-		return self.loss	
+	def statistics(self,model,precision = 1e4):
+		loss = self.loss
+		all_W = model.get_W()
+		Wmean = np.mean(all_W)
+		Wstd = np.std(all_W)
+		all_b = model.get_b()
+		bmean = np.mean(all_b)
+		bstd = np.std(all_b)
+		return {'loss':int(precision*loss)/precision,'Wmean':int(precision*Wmean)/precision,'Wstd':int(precision*Wstd)/precision,'bmean':int(precision*bmean)/precision,'bstd':int(precision*bstd)/precision}
+	def get_losses(self):
+		return self.losses
 	def loss_gradient(self,model,loss_func,y):
 		grad = [None]*len(model.synapses)
 		last_grad = loss_grad(loss_func,model.layers[-1],y)
@@ -73,12 +82,26 @@ class Trainer():
 					model.synapses[i].b = model.synapses[i].b-l_rate*bgrad[i]
 		return model
 	def train(self,X,y,model,num_epochs,batch_size,l_rate,loss_func):
+		self.losses = []
 		for i in range(0,num_epochs):
+			try:  # used try so that if user pressed other than the given key error will not be shown
+				if keyboard.is_pressed('q'):  # if key 'q' is pressed 
+					print('You Pressed A Key!')
+					break  # finishing the loop
+			except:
+				break
 			for j in range(0,int(len(X)/batch_size)):
+				try:  # used try so that if user pressed other than the given key error will not be shown
+					if keyboard.is_pressed('q'):  # if key 'q' is pressed 
+						print('You Pressed A Key!')
+						break  # finishing the loop
+				except:
+					break
 				wgrad = [0]*len(model.synapses)
 				bgrad = [0]*len(model.synapses)
 				interval = np.arange(j*batch_size,(j+1)*batch_size)
-				print('epoch ',i,', ',interval[0],':',interval[-1])
+				if j%20==0:
+					print('epoch ',i,', ',interval[0],':',interval[-1])
 				self.loss = 0
 				for k in range(0,len(interval)):
 					model.feed_fwd(X[interval][k])
@@ -98,12 +121,14 @@ class Trainer():
 				if self.reg_type == 'L2':
 					reg = np.sum(np.square(model.get_W()))
 				self.loss = self.loss/len(interval)+self.reg_coeff*reg
-				   
-			interval = np.arange(interval[-1]+1,len(X))
-			if len(interval)>0:
-				print('rest of batch(not calculated):')
-				if i==0:
-					print(interval[0],':',interval[-1])
+				self.losses.append(self.loss)
+				if j%20==0:
+					print('stats: ',self.statistics(model))
+			#interval = np.arange(interval[-1]+1,len(X))
+			#if len(interval)>0:
+			#	print('rest of batch(not calculated):')
+			#	if i==0:
+			#		print(interval[0],':',interval[-1])
 				
 		
 class Model():
@@ -131,6 +156,11 @@ class Model():
 		for i in range(1,len(self.synapses)):
 			all_W = np.concatenate((all_W,np.asarray(self.synapses[i].W).flatten()),axis=None)
 		return all_W
+	def get_b(self):
+		all_b = np.asarray(self.synapses[0].b).flatten()
+		for i in range(1,len(self.synapses)):
+			all_b = np.concatenate((all_b,np.asarray(self.synapses[i].b).flatten()),axis=None)
+		return all_b
 	
 		
 		
@@ -162,10 +192,12 @@ class Filter():
 		self.output_size = [out_sizeX,out_sizeY,n]
 	def feed_fwd(self,input):
 		layer = np.zeros(self.output_size)
+		self.preact_output = []
 		for k in range(0,self.number):
 			conv = convolve(input,self.W[k], mode='full')[:,:,input.shape[2]-1]+self.b[k]
 			unpadding = [[self.size[0]-self.padding-1,-(self.size[0]-self.padding-1)],[self.size[1]-self.padding-1,-(self.size[1]-self.padding-1)]]
 			conv = conv[unpadding[0][0]:(unpadding[0][1] or None):self.stride,unpadding[1][0]:(unpadding[1][1] or None):self.stride]
+			self.preact_output.append(conv)
 			layer[:,:,k] = self.activation(conv)
 		return layer
 	def get_grad(self,input,last_grad):
@@ -173,9 +205,7 @@ class Filter():
 		wgrad = 0*self.W
 		xgrad = 0.0*input
 		for k in range(0,self.number):
-			conv = convolve(input,self.W[k], mode='full')[:,:,input.shape[2]-1]+self.b[k]
-			unpadding = [[self.size[0]-self.padding-1,-(self.size[0]-self.padding-1)],[self.size[1]-self.padding-1,-(self.size[1]-self.padding-1)]]
-			conv = conv[unpadding[0][0]:(unpadding[0][1] or None):self.stride,unpadding[1][0]:(unpadding[1][1] or None):self.stride]
+			conv = self.preact_output[k]
 			actigrad = activation_grad(self.activation,conv)
 			actigrad_spaces = np.zeros((self.stride*actigrad.shape[0]-self.stride+1,self.stride*actigrad.shape[1]-self.stride+1))
 			actigrad_spaces[::self.stride,::self.stride] = last_grad[:,:,k]*actigrad
@@ -205,9 +235,10 @@ class FC():
 		self.W = init_W*np.random.randn(streched_input_size,size)
 		self.b = np.zeros(size)
 	def feed_fwd(self,input):
-		return self.activation(np.dot(input.flatten(),self.W)+self.b)
+		self.preact_output = np.dot(input.flatten(),self.W)+self.b
+		return self.activation(self.preact_output)
 	def get_grad(self,input,last_grad):
-		actigrad = activation_grad(self.activation,np.dot(input.flatten(),self.W)+self.b)
+		actigrad = activation_grad(self.activation,self.preact_output)
 		bgrad = last_grad*actigrad
 		wgrad = np.outer(input.flatten(),last_grad*actigrad)
 		xgrad = np.dot(last_grad*actigrad,self.W.T)
