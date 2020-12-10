@@ -3,6 +3,8 @@ import tensorflow as tf
 from tensorflow.keras.layers import Dense, Flatten, Conv2D, Reshape
 from tensorflow.keras import Model
 import matplotlib.pyplot as plt
+import time
+
 mnist = tf.keras.datasets.mnist
 
 (x_train, y_train), (x_test, y_test) = mnist.load_data()
@@ -46,20 +48,24 @@ train_accuracy = tf.keras.metrics.MeanSquaredError(name='train_accuracy')
 test_loss = tf.keras.metrics.Mean(name='test_loss')
 test_accuracy = tf.keras.metrics.MeanSquaredError(name='test_accuracy')
 
-@tf.function
+
 def train_step(images, labels):
   with tf.GradientTape() as tape:
     # training=True is only needed if there are layers with different
     # behavior during training versus inference (e.g. Dropout).
     predictions = model(images, training=True)
     loss = loss_object(images, predictions)
+    plt.imshow(images[0].numpy())
+    plt.show()
+    plt.imshow(predictions[0].numpy())
+    plt.show()
   gradients = tape.gradient(loss, model.trainable_variables)
   optimizer.apply_gradients(zip(gradients, model.trainable_variables))
 
   train_loss(loss)
   train_accuracy(images, predictions)
   
-
+@tf.function
 def test_step(images, labels, display=False):
   # training=False is only needed if there are layers with different
   # behavior during training versus inference (e.g. Dropout).
@@ -75,7 +81,7 @@ def test_step(images, labels, display=False):
 
 
 EPOCHS = 1
-
+start_time = time.time()
 for epoch in range(EPOCHS):
   # Reset the metrics at the start of the next epoch
   train_loss.reset_states()
@@ -96,5 +102,5 @@ for epoch in range(EPOCHS):
     f'Test Loss: {test_loss.result()}, '
     f'Test Accuracy: {test_accuracy.result() * 100}'
   )
-
+print(time.time()-start_time)
 
