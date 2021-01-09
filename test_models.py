@@ -4,7 +4,7 @@ import model_storage as ms
 getter = nd.Datagetter()
 X_test,y_test,mndata = getter.get_MNIST('test',printfirst=0)
 X_test_square = X_test.reshape((10000,28,28,1))
-model = ms.get('Filter 10 5x5 2 3 preLU 60000x10')
+model = ms.get('FC 30 30 30 30 preLU 60000x200_again2')
 index = 0
 acc = 0
 fast = 1
