@@ -1,106 +1,42 @@
-import tensorflow as tf
+import common as c
+import model_functions as mf
 
-from tensorflow.keras.layers import Dense, Flatten, Conv2D, Reshape
-from tensorflow.keras import Model
-import matplotlib.pyplot as plt
-import time
-
-mnist = tf.keras.datasets.mnist
-
-(x_train, y_train), (x_test, y_test) = mnist.load_data()
-x_train, x_test = x_train / 255.0, x_test / 255.0
-print(x_train[0].shape)
-# Add a channels dimension
-x_train = x_train[..., tf.newaxis].astype("float32")
-x_test = x_test[..., tf.newaxis].astype("float32")
-
-train_ds = tf.data.Dataset.from_tensor_slices(
-    (x_train, y_train)).shuffle(10000).batch(32)
-
-test_ds = tf.data.Dataset.from_tensor_slices((x_test, y_test)).batch(32)
-
-class MyModel(Model):
-  def __init__(self):
-    super(MyModel, self).__init__()
-    self.conv1 = Conv2D(32, 3, activation='relu')
-    self.flatten = Flatten()
-    self.d1 = Dense(128, activation='relu')
-    self.d2 = Dense(784)
-    self.reshape = Reshape((28,28))
-
-  def call(self, x):
-    x = self.conv1(x)
-    x = self.flatten(x)
-   # x = self.d1(x)
-    x = self.d2(x)
-    return self.reshape(x)
-
-# Create an instance of the model
-model = MyModel()
-
-loss_object = tf.keras.losses.MeanSquaredError()
-
-optimizer = tf.keras.optimizers.Adam()
-
-train_loss = tf.keras.metrics.Mean(name='train_loss')
-train_accuracy = tf.keras.metrics.MeanSquaredError(name='train_accuracy')
-
-test_loss = tf.keras.metrics.Mean(name='test_loss')
-test_accuracy = tf.keras.metrics.MeanSquaredError(name='test_accuracy')
-
-
-def train_step(images, labels):
-  with tf.GradientTape() as tape:
-    # training=True is only needed if there are layers with different
-    # behavior during training versus inference (e.g. Dropout).
-    predictions = model(images, training=True)
-    loss = loss_object(images, predictions)
-    plt.imshow(images[0].numpy()[:,:,0])
-    plt.show()
-    plt.imshow(predictions[0].numpy())
-    plt.show()
-  gradients = tape.gradient(loss, model.trainable_variables)
-  optimizer.apply_gradients(zip(gradients, model.trainable_variables))
-
-  train_loss(loss)
-  train_accuracy(images, predictions)
-  
-@tf.function
-def test_step(images, labels, display=False):
-  # training=False is only needed if there are layers with different
-  # behavior during training versus inference (e.g. Dropout).
-  predictions = model(images, training=False)
-  t_loss = loss_object(images, predictions)
-  if display:
-    plt.imshow(images[0].numpy())
-    plt.show()
-    plt.imshow(predictions[0].numpy())
-    plt.show()
-  test_loss(t_loss)
-  test_accuracy(images, predictions)
-
-
-EPOCHS = 1
-start_time = time.time()
-for epoch in range(EPOCHS):
-  # Reset the metrics at the start of the next epoch
-  train_loss.reset_states()
-  train_accuracy.reset_states()
-  test_loss.reset_states()
-  test_accuracy.reset_states()
-
-  for images, labels in train_ds:
-    train_step(images, labels)
-
-  for test_images, test_labels in test_ds:
-    test_step(test_images, test_labels)
-
-  print(
-    f'Epoch {epoch + 1}, '
-    f'Loss: {train_loss.result()}, '
-    f'Accuracy: {train_accuracy.result() * 100}, '
-    f'Test Loss: {test_loss.result()}, '
-    f'Test Accuracy: {test_accuracy.result() * 100}'
-  )
-print(time.time()-start_time)
-
+def input(video,x1,x2):
+	return mf.light_qty(video,x1,x2)/255
+def dyna_input(video,X1,X2):
+	return mf.dyna_light_qty(video,X1,X2)/255
+X = input(video,x1,x2)
+class L2_model():
+	def __init__(self,w1,w2):
+		self.w1 = w1
+		self.w2 = w2
+		self.phr = 0
+		self.lam = 0
+	def feed_fwd(self,X):
+		self.batch_size = len(X)
+		self.phr_hist = np.zeros(self.batch_size)
+		self.lam_hist = np.zeros(self.batch_size)
+		for t in range(self.batch_size):
+			self.phr = X[t]+self.w2*self.lam
+			self.lam = max(0,self.w1*self.phr)
+			self.phr_hist[t] = self.phr
+			self.lam_hist[t] = self.lam
+	def back_prop(self,Y):
+		grad_lam = np.zeros((self.batch_size,self.batch_size))
+		grad_phr = np.zeros((self.batch_size,self.batch_size))
+		self.grad_w1 = np.zeros((self.batch_size,self.batch_size))
+		self.grad_w2 = np.zeros((self.batch_size,self.batch_size))
+		for i in range(self.batch_size):
+			grad_lam[i,i] = self.lam_hist[i]-Y[i]
+			grad_phr[i,i] = grad_lam[i,i]*self.w1
+			self.grad_w1[i,i] = grad_lam[i,i]*self.phr_hist[t]
+			self.grad_w2[i,i] = grad_phr[i,i]*self.lam_hist[i-1]
+			for t in range(i-1,t1-1,-1):
+				grad_lam[i,t] = grad_phr[i,t+1]*self.w2
+				grad_phr[i,t] = grad_lam[i,t]*self.w1
+				self.grad_w1[i,t] = grad_lam[i,t]*self.phr_hist[t]
+				self.grad_w2[i,t] = grad_phr[i,t]*self.lam_hist[t-1]
+	
+	def update(self,alpha):
+		self.w1 -= alpha*self.grad_w1.sum
+		self.w2 -= alpha*self.grad_w2.sum
